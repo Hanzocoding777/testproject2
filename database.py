@@ -218,3 +218,147 @@ class Database:
                 })
             
             return teams
+    
+    def get_all_teams_by_status(self, status: str) -> List[dict]:
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT t.id, t.team_name, t.status, t.registration_date, t.captain_contact, t.admin_comment
+                FROM teams t
+                WHERE t.status = ?
+                ORDER BY t.registration_date DESC
+            ''', (status,))
+            
+            teams = []
+            for team in cursor.fetchall():
+                cursor.execute('''
+                    SELECT nickname, telegram_username, telegram_id
+                    FROM players
+                    WHERE team_id = ?
+                ''', (team[0],))
+                
+                players = cursor.fetchall()
+                teams.append({
+                    'id': team[0],
+                    'team_name': team[1],
+                    'status': team[2],
+                    'registration_date': team[3],
+                    'captain_contact': team[4],
+                    'admin_comment': team[5],
+                    'players': players
+                })
+            
+            return teams
+
+    def get_teams_count_by_status(self, status: str) -> int:
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM teams WHERE status = ?
+            ''', (status,))
+            return cursor.fetchone()[0]
+
+    def update_team_comment(self, team_id: int, comment: str) -> bool:
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE teams
+                SET admin_comment = ?
+                WHERE id = ?
+            ''', (comment, team_id))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    # Новые методы для статистики
+    def get_stats(self) -> dict:
+        """Получить статистику о командах и игроках."""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            
+            # Общее количество команд
+            cursor.execute('SELECT COUNT(*) FROM teams')
+            total_teams = cursor.fetchone()[0]
+            
+            # Количество команд по статусам
+            cursor.execute('SELECT status, COUNT(*) FROM teams GROUP BY status')
+            status_counts = {status: count for status, count in cursor.fetchall()}
+            
+            # Общее количество игроков
+            cursor.execute('SELECT COUNT(*) FROM players')
+            total_players = cursor.fetchone()[0]
+            
+            # Среднее количество игроков в команде
+            avg_players = total_players / total_teams if total_teams > 0 else 0
+            
+            # Количество игроков в командах с разными статусами
+            cursor.execute('''
+                SELECT t.status, COUNT(p.id)
+                FROM teams t
+                JOIN players p ON t.id = p.team_id
+                GROUP BY t.status
+            ''')
+            players_by_status = {status: count for status, count in cursor.fetchall()}
+            
+            # Последние регистрации
+            cursor.execute('''
+                SELECT team_name, registration_date
+                FROM teams
+                ORDER BY registration_date DESC
+                LIMIT 5
+            ''')
+            recent_registrations = [
+                {'team_name': team_name, 'date': date}
+                for team_name, date in cursor.fetchall()
+            ]
+            
+            # Количество администраторов
+            cursor.execute('SELECT COUNT(*) FROM admins')
+            admin_count = cursor.fetchone()[0]
+            
+            return {
+                'total_teams': total_teams,
+                'teams_by_status': status_counts,
+                'total_players': total_players,
+                'avg_players_per_team': avg_players,
+                'players_by_status': players_by_status,
+                'recent_registrations': recent_registrations,
+                'admin_count': admin_count
+            }
+            
+    def get_admins(self) -> List[dict]:
+        """Получить список всех администраторов."""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT telegram_id, username, added_date
+                FROM admins
+                ORDER BY added_date DESC
+            ''')
+            
+            return [
+                {'telegram_id': tid, 'username': username, 'added_date': date}
+                for tid, username, date in cursor.fetchall()
+            ]
+            
+    def remove_admin(self, telegram_id: int) -> bool:
+        """Удалить администратора по его Telegram ID."""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM admins WHERE telegram_id = ?', (telegram_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def get_daily_registrations(self, days: int = 7) -> List[Tuple[str, int]]:
+        """Получить статистику регистраций по дням за последние N дней."""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.create_function("DATE", 1, lambda timestamp: timestamp.split()[0])
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DATE(registration_date) as reg_date, COUNT(*) as count
+                FROM teams
+                GROUP BY DATE(registration_date)
+                ORDER BY reg_date DESC
+                LIMIT ?
+            ''', (days,))
+            
+            return cursor.fetchall()
