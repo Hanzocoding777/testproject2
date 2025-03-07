@@ -34,14 +34,12 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
     TEAM_NAME,
     CAPTAIN_NICKNAME,
     PLAYERS_LIST,
-    SUBSCRIPTION_CHECK_RESULT,
+    SUBSCRIPTION_CHECK_RESULT,  # New state
     CAPTAIN_CONTACTS,
     TOURNAMENT_INFO,
     FAQ,
-    WAITING_TEAM_NAME,
-    WAITING_FOR_COMMENT,
-    WAITING_FOR_ADMIN_ID  # Add this new state
-) = range(11)  # Изменено на range(10)
+    WAITING_TEAM_NAME
+) = range(9)  # Изменено на range(10)
 
 # Channel ID for subscription check
 CHANNEL_ID = "@m5cup"
@@ -354,7 +352,7 @@ async def check_players_subscription(update: Update, context: ContextTypes.DEFAU
     unsubscribed_players = []
     subscribed_players = []
 
-    for i, player in enumerate(players_data): # Добавляем индекс
+    for player in players_data:
         if player['telegram_id'] is None:
             telegram_id = await get_tg_id_by_username(player['username'])
             player['telegram_id'] = telegram_id
@@ -389,7 +387,6 @@ async def check_players_subscription(update: Update, context: ContextTypes.DEFAU
     # Сохраняем сообщение для повторного использования
     context.user_data['subscription_message'] = message
     # Сохраняем информацию об игроках, включая telegram_id
-    # Обновляем информацию об игроках в context.user_data (после получения telegram_id)
     context.user_data['players_data'] = players_data
 
     await update.message.reply_text(message, reply_markup=get_subscription_result_keyboard())
@@ -528,124 +525,6 @@ async def post_init(application: Application):
     await userbot.start()
     print("Pyrogram client started.")
 
-async def admin_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle adding a new admin."""
-    query = update.callback_query
-    await query.answer()
-    await query.message.reply_text(
-        "👤 Введите Telegram ID нового администратора:",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("Отмена", callback_data="admin_panel")
-        ]])
-    )
-    return WAITING_FOR_ADMIN_ID
-
-async def process_new_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process new admin ID input."""
-    admin_id = update.message.text.strip()
-
-    try:
-        admin_id = int(admin_id)
-
-        # Check if user is a bot
-        user = await context.bot.get_chat(admin_id)
-        if user.type == "private" and user.is_bot:
-            await update.message.reply_text(
-                "❌ Нельзя добавить бота в качестве администратора.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Вернуться в панель", callback_data="admin_panel")
-                ]])
-            )
-            return ConversationHandler.WAITING
-
-        # Add to database
-        if db.add_admin(admin_id):
-            await update.message.reply_text(
-                f"✅ Администратор с ID {admin_id} успешно добавлен.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Вернуться в панель", callback_data="admin_panel")
-                ]])
-            )
-        else:
-            await update.message.reply_text(
-                f"⚠️ Пользователь с ID {admin_id} уже является администратором.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Вернуться в панель", callback_data="admin_panel")
-                ]])
-            )
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Некорректный ID. Введите числовой Telegram ID.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Вернуться в панель", callback_data="admin_panel")
-            ]])
-        )
-    except Exception as e:
-        logger.error(f"Error adding admin with ID {admin_id}: {e}")
-        await update.message.reply_text(
-            f"❌ Произошла ошибка при добавлении администратора.  Попробуйте позже.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Вернуться в панель", callback_data="admin_panel")
-            ]])
-        )
-
-    return ConversationHandler.WAITING
-
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show detailed registration statistics."""
-    query = update.callback_query
-    await query.answer()
-
-    # Get statistics from database
-    stats = db.get_stats()
-
-    # Format status counts
-    status_counts = stats['teams_by_status']
-    pending_count = status_counts.get('pending', 0)
-    approved_count = status_counts.get('approved', 0)
-    rejected_count = status_counts.get('rejected', 0)
-
-    # Format recent registrations
-    recent_reg_text = "\n".join([
-        f"• {reg['team_name']} ({reg['date']})"
-        for reg in stats['recent_registrations']
-    ]) if stats['recent_registrations'] else "Нет данных"
-
-    # Players by status
-    players_status = stats['players_by_status']
-    pending_players = players_status.get('pending', 0)
-    approved_players = players_status.get('approved', 0)
-    rejected_players = players_status.get('rejected', 0)
-
-    stats_text = (
-        "📊 Подробная статистика регистраций:\n\n"
-        f"👥 Команды:\n"
-        f"  • 🔄 Ожидают проверки: {pending_count}\n"
-        f"  • ✅ Одобрено: {approved_count}\n"
-        f"  • ❌ Отклонено: {rejected_count}\n"
-        f"  • 📝 Всего команд: {stats['total_teams']}\n\n"
-
-        f"🎮 Игроки:\n"
-        f"  • 👤 Всего игроков: {stats['total_players']}\n"
-        f"  • 📊 Среднее кол-во в команде: {stats['avg_players_per_team']:.1f}\n"
-        f"  • 🔄 В ожидающих командах: {pending_players}\n"
-        f"  • ✅ В одобренных командах: {approved_players}\n"
-        f"  • ❌ В отклоненных командах: {rejected_players}\n\n"
-
-        f"🆕 Последние регистрации:\n{recent_reg_text}\n\n"
-
-        f"👮 Администраторов в системе: {stats['admin_count']}"
-    )
-
-    await query.message.edit_text(
-        stats_text,
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("Назад", callback_data="admin_panel")
-        ]]),
-        parse_mode='Markdown'
-    )
-
-    return ConversationHandler.WAITING
 
 def main() -> None:
     """Start the bot."""
@@ -662,26 +541,20 @@ def main() -> None:
             MessageHandler(filters.TEXT & ~filters.COMMAND, process_comment),
             CallbackQueryHandler(cancel_comment, pattern="^cancel_comment$")
         ],
-        WAITING_FOR_ADMIN_ID: [  # Добавляем новое состояние для обработки ввода ID админа
-            MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_admin),
-        ],
-        # Используем WAITING вместо END для обработки меню и действий с командами
-        ConversationHandler.WAITING: [
+        # Добавьте отдельное состояние для обработки меню и действий с командами
+        ConversationHandler.WAITING: [  # Используйте WAITING вместо END
             CallbackQueryHandler(admin_teams_menu, pattern="^admin_teams_menu$"),
             CallbackQueryHandler(admin_teams_list_pending, pattern="^admin_teams_list_pending$"),
             CallbackQueryHandler(admin_teams_list_approved, pattern="^admin_teams_list_approved$"),
             CallbackQueryHandler(admin_teams_list_rejected, pattern="^admin_teams_list_rejected$"),
-            CallbackQueryHandler(admin_add_admin, pattern="^admin_add_admin$"),  # Добавляем обработчик для "Добавить админа"
-            CallbackQueryHandler(admin_stats, pattern="^admin_stats$"),  # Добавляем обработчик для "Статистика"
             CallbackQueryHandler(handle_team_action, pattern="^(approve|reject|comment)_team_"),
             CallbackQueryHandler(admin_panel, pattern="^admin_panel$"),
         ],
     },
     fallbacks=[CommandHandler("admin", admin_command)],
+    # Добавьте map_to_parent если вы вкладываете этот ConversationHandler в другой
     map_to_parent={
         ConversationHandler.END: ConversationHandler.END,
-        ConversationHandler.WAITING: ConversationHandler.WAITING,
-        WAITING_FOR_ADMIN_ID: ConversationHandler.WAITING
     }
 )
 
@@ -734,7 +607,7 @@ def main() -> None:
 
     # Start the Bot
     application.run_polling()
-
+    
     # Остановка Pyrogram клиента при выходе
     asyncio.run(userbot.stop())
 
