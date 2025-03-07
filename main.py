@@ -11,7 +11,16 @@ from pyrogram.enums import ParseMode
 
 # Добавленные импорты
 from database import Database
-from admin_handlers import admin_command, admin_teams_list, handle_team_action, admin_teams_menu, process_comment, cancel_comment, admin_panel, admin_teams_list_pending, admin_teams_list_approved, admin_teams_list_rejected, WAITING_FOR_COMMENT
+from admin_handlers import (
+    admin_command,
+    handle_team_action,
+    admin_teams_menu,
+    WAITING_FOR_COMMENT,
+    show_teams_by_status,
+    view_team,
+    back_to_admin,
+    save_comment
+)
 from registration_status import check_registration_status
 
 
@@ -530,35 +539,39 @@ def main() -> None:
     """Start the bot."""
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # Добавляем базу данных в bot_data, чтобы она была доступна в обработчиках
+    # Добавляем базу данных в bot_data
     application.bot_data['db'] = db
 
-    # Добавляем обработчики админ-панели
+    # Обновляем обработчики админ-панели
     admin_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("admin", admin_command)],
-    states={
-        WAITING_FOR_COMMENT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, process_comment),
-            CallbackQueryHandler(cancel_comment, pattern="^cancel_comment$")
-        ],
-        # Добавьте отдельное состояние для обработки меню и действий с командами
-        ConversationHandler.WAITING: [  # Используйте WAITING вместо END
-            CallbackQueryHandler(admin_teams_menu, pattern="^admin_teams_menu$"),
-            CallbackQueryHandler(admin_teams_list_pending, pattern="^admin_teams_list_pending$"),
-            CallbackQueryHandler(admin_teams_list_approved, pattern="^admin_teams_list_approved$"),
-            CallbackQueryHandler(admin_teams_list_rejected, pattern="^admin_teams_list_rejected$"),
-            CallbackQueryHandler(handle_team_action, pattern="^(approve|reject|comment)_team_"),
-            CallbackQueryHandler(admin_panel, pattern="^admin_panel$"),
-        ],
-    },
-    fallbacks=[CommandHandler("admin", admin_command)],
-    # Добавьте map_to_parent если вы вкладываете этот ConversationHandler в другой
-    map_to_parent={
-        ConversationHandler.END: ConversationHandler.END,
-    }
-)
+        entry_points=[CommandHandler("admin", admin_command)],
+        states={
+            WAITING_FOR_COMMENT: [
+                # Добавляем обработчик текстовых сообщений для сохранения комментария
+                MessageHandler(filters.TEXT & ~filters.COMMAND, save_comment),
+                CallbackQueryHandler(view_team, pattern="^view_team_"),
+            ],
+            ConversationHandler.WAITING: [
+                CallbackQueryHandler(admin_teams_menu, pattern="^admin_teams_menu$"),
+                CallbackQueryHandler(handle_team_action, pattern="^(approve|reject|comment)_team_"),
+                CallbackQueryHandler(back_to_admin, pattern="^back_to_admin$"),
+                CallbackQueryHandler(show_teams_by_status, pattern="^show_teams_"),
+                CallbackQueryHandler(view_team, pattern="^view_team_"),
+            ],
+        },
+        fallbacks=[CommandHandler("admin", admin_command)],
+        map_to_parent={
+            ConversationHandler.END: ConversationHandler.END,
+        }
+    )
 
     application.add_handler(admin_conv_handler)
+
+    # Добавляем новые обработчики
+    application.add_handler(CallbackQueryHandler(show_teams_by_status, pattern="^show_teams_"))
+    application.add_handler(CallbackQueryHandler(view_team, pattern="^view_team_"))
+    application.add_handler(CallbackQueryHandler(back_to_admin, pattern="^back_to_admin$"))
+    
 
     # Обновляем ConversationHandler для регистрации пользователей
     conv_handler = ConversationHandler(
